@@ -18,6 +18,7 @@ interface Car {
   km: number
   description: string
   image_url: string
+  images: string[]
 }
 
 export default function AdminPanel() {
@@ -36,7 +37,8 @@ export default function AdminPanel() {
     image_url: '',
   })
   const [loading, setLoading] = useState(false)
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageFiles, setImageFiles] = useState<FileList | null>(null)
+  const [uploadProgress, setUploadProgress] = useState('')
 
   useEffect(() => {
     const saved = sessionStorage.getItem('admin_logged_in')
@@ -52,6 +54,7 @@ export default function AdminPanel() {
         const carsList = Object.keys(data).map((key) => ({
           id: key,
           ...data[key],
+          images: data[key].images || (data[key].image_url ? [data[key].image_url] : []),
         }))
         setCars(carsList)
       } else {
@@ -81,18 +84,27 @@ export default function AdminPanel() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    let imageUrl = form.image_url
-    if (imageFile) {
-      try {
-        const imgRef = storageRef(storage, `cars/${Date.now()}_${imageFile.name}`)
-        await uploadBytes(imgRef, imageFile)
-        imageUrl = await getDownloadURL(imgRef)
-      } catch (error) {
-        alert('Error uploading image')
-        setLoading(false)
-        return
+    const imageUrls: string[] = []
+
+    if (imageFiles && imageFiles.length > 0) {
+      for (let i = 0; i < imageFiles.length; i++) {
+        try {
+          setUploadProgress(`Uploading image ${i + 1} of ${imageFiles.length}...`)
+          const file = imageFiles[i]
+          const imgRef = storageRef(storage, `cars/${Date.now()}_${file.name}`)
+          await uploadBytes(imgRef, file)
+          const url = await getDownloadURL(imgRef)
+          imageUrls.push(url)
+        } catch (error) {
+          alert('Error uploading image ' + (i + 1))
+          setLoading(false)
+          setUploadProgress('')
+          return
+        }
       }
     }
+
+    setUploadProgress('Saving car...')
     const carsRef = ref(database, 'cars')
     push(carsRef, {
       name: form.name,
@@ -101,13 +113,16 @@ export default function AdminPanel() {
       engine: form.engine,
       km: parseInt(form.km),
       description: form.description,
-      image_url: imageUrl,
+      image_url: imageUrls[0] || '',
+      images: imageUrls,
     }).then(() => {
-      alert('Car added!')
+      alert('Car added with ' + imageUrls.length + ' images!')
       setForm({ name: '', year: '', price: '', engine: '', km: '', description: '', image_url: '' })
-      setImageFile(null)
+      setImageFiles(null)
+      const fileInput = document.getElementById('file-input') as HTMLInputElement
+      if (fileInput) fileInput.value = ''
     }).catch((error) => alert('Error: ' + error.message))
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); setUploadProgress('') })
   }
 
   function deleteCar(id: string) {
@@ -137,9 +152,7 @@ export default function AdminPanel() {
             <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} style={inputStyle} required />
             <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
             {loginError && <p style={{ color: 'red', marginBottom: '1rem', textAlign: 'center' }}>{loginError}</p>}
-            <button type="submit" style={{ width: '100%', padding: '14px', background: '#0B1F3A', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
-              Login
-            </button>
+            <button type="submit" style={{ width: '100%', padding: '14px', background: '#0B1F3A', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>Login</button>
           </form>
         </div>
       </div>
@@ -160,10 +173,28 @@ export default function AdminPanel() {
           <input placeholder="Price" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} style={inputStyle} />
           <input placeholder="Engine" value={form.engine} onChange={(e) => setForm({ ...form, engine: e.target.value })} style={inputStyle} />
           <input placeholder="KM" type="number" value={form.km} onChange={(e) => setForm({ ...form, km: e.target.value })} style={inputStyle} />
-          <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} style={inputStyle} />
+          <div style={{ marginBottom: '12px', padding: '16px', border: '2px dashed #C9A84C', borderRadius: '8px', background: '#FFFDF5' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#0B1F3A' }}>
+              Upload Images (select multiple)
+            </label>
+            <input
+              id="file-input"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setImageFiles(e.target.files)}
+              style={{ fontSize: '14px' }}
+            />
+            {imageFiles && imageFiles.length > 0 && (
+              <p style={{ marginTop: '8px', color: '#1A7A4A', fontWeight: 'bold' }}>
+                {imageFiles.length} images selected
+              </p>
+            )}
+          </div>
           <textarea placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, minHeight: '100px', resize: 'vertical' }} />
+          {uploadProgress && <p style={{ color: '#C9A84C', fontWeight: 'bold', marginBottom: '12px' }}>{uploadProgress}</p>}
           <button type="submit" disabled={loading} style={{ width: '100%', padding: '12px 24px', background: '#0B1F3A', color: 'white', border: 'none', borderRadius: '5px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '16px' }}>
-            {loading ? 'Loading...' : 'Add Car'}
+            {loading ? 'Uploading...' : 'Add Car'}
           </button>
         </form>
       </div>
@@ -175,7 +206,16 @@ export default function AdminPanel() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem', marginTop: '1rem' }}>
             {cars.map((car) => (
               <div key={car.id} style={{ border: '1px solid #ddd', borderRadius: '10px', overflow: 'hidden', background: 'white' }}>
-                {car.image_url && <img src={car.image_url} alt={car.name} style={{ width: '100%', height: '200px', objectFit: 'cover' }} />}
+                {car.images && car.images.length > 0 && (
+                  <div style={{ position: 'relative' }}>
+                    <img src={car.images[0]} alt={car.name} style={{ width: '100%', height: '200px', objectFit: 'cover' }} />
+                    {car.images.length > 1 && (
+                      <span style={{ position: 'absolute', bottom: '8px', left: '8px', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px' }}>
+                        {car.images.length} images
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div style={{ padding: '1rem' }}>
                   <h3 style={{ color: '#000', marginBottom: '0.5rem' }}>{car.name}</h3>
                   <p style={{ color: '#666', marginBottom: '0.5rem' }}>{car.year} · {car.engine} · {car.km} km</p>
