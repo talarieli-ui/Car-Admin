@@ -29,7 +29,7 @@ export default function AdminPanel() {
   const [cars, setCars] = useState<Car[]>([])
   const [form, setForm] = useState({ name: '', year: '', price: '', engine: '', km: '', description: '' })
   const [loading, setLoading] = useState(false)
-  const [imageFiles, setImageFiles] = useState<FileList | null>(null)
+  const [imageFiles, setImageFiles] = useState<File[]>([])
   const [uploadProgress, setUploadProgress] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [existingImages, setExistingImages] = useState<string[]>([])
@@ -75,7 +75,7 @@ export default function AdminPanel() {
       description: car.description || '',
     })
     setExistingImages(car.images || [])
-    setImageFiles(null)
+    setImageFiles([])
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -83,7 +83,7 @@ export default function AdminPanel() {
     setEditingId(null)
     setForm({ name: '', year: '', price: '', engine: '', km: '', description: '' })
     setExistingImages([])
-    setImageFiles(null)
+    setImageFiles([])
   }
 
   function removeExistingImage(idx: number) {
@@ -95,12 +95,12 @@ export default function AdminPanel() {
     setLoading(true)
     const newImageUrls: string[] = []
 
-    if (imageFiles && imageFiles.length > 0) {
+    if (imageFiles.length > 0) {
       for (let i = 0; i < imageFiles.length; i++) {
         try {
           setUploadProgress(`Uploading image ${i + 1} of ${imageFiles.length}...`)
           const file = imageFiles[i]
-          const imgRef = storageRef(storage, `cars/${Date.now()}_${file.name}`)
+          const imgRef = storageRef(storage, `cars/${Date.now()}_${i}_${file.name}`)
           await uploadBytes(imgRef, file)
           const url = await getDownloadURL(imgRef)
           newImageUrls.push(url)
@@ -204,8 +204,8 @@ export default function AdminPanel() {
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#0B1F3A' }}>
               {editingId ? 'Add More Images' : 'Upload Images'} (select multiple)
             </label>
-            <input id="file-input" type="file" accept="image/*" multiple onChange={(e) => setImageFiles(e.target.files)} style={{ fontSize: '14px' }} />
-            {imageFiles && imageFiles.length > 0 && <p style={{ marginTop: '8px', color: '#1A7A4A', fontWeight: 'bold' }}>{imageFiles.length} new images selected</p>}
+            <input id="file-input" type="file" accept="image/*" multiple onChange={(e) => { const f = e.target.files; if(f) { const arr: File[] = []; for(let i=0;i<f.length;i++) arr.push(f[i]); setImageFiles(arr) } }} style={{ fontSize: '14px' }} />
+            {imageFiles.length > 0 && <p style={{ marginTop: '8px', color: '#1A7A4A', fontWeight: 'bold' }}>{imageFiles.length} new images selected</p>}
           </div>
 
           {uploadProgress && <p style={{ color: '#C9A84C', fontWeight: 'bold', marginBottom: '12px' }}>{uploadProgress}</p>}
