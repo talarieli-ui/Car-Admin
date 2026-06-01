@@ -1,13 +1,11 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { database, storage } from '../lib/firebase'
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
 import { ref, push, set, remove, onValue } from 'firebase/database'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 
-const USERS = [
-  { username: 'Talar', password: 'Keren0208#^' },
-  { username: 'yaniv', password: 'Tal0905#^' },
-]
+const auth = getAuth()
 
 interface Car {
   id: string
@@ -22,8 +20,9 @@ interface Car {
 }
 
 export default function AdminPanel() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [username, setUsername] = useState('')
+  const [user, setUser] = useState<any>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [cars, setCars] = useState<Car[]>([])
@@ -35,12 +34,15 @@ export default function AdminPanel() {
   const [existingImages, setExistingImages] = useState<string[]>([])
 
   useEffect(() => {
-    const saved = sessionStorage.getItem('admin_logged_in')
-    if (saved === 'true') setIsLoggedIn(true)
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u)
+      setAuthLoading(false)
+    })
+    return () => unsub()
   }, [])
 
   useEffect(() => {
-    if (!isLoggedIn) return
+    if (!user) return
     const carsRef = ref(database, 'cars')
     const unsubscribe = onValue(carsRef, (snapshot) => {
       const data = snapshot.val()
@@ -53,26 +55,31 @@ export default function AdminPanel() {
       } else { setCars([]) }
     })
     return () => unsubscribe()
-  }, [isLoggedIn])
+  }, [user])
 
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-    const found = USERS.find(u => u.username === username && u.password === password)
-    if (found) { setIsLoggedIn(true); sessionStorage.setItem('admin_logged_in', 'true'); setLoginError('') }
-    else { setLoginError('Wrong username or password') }
+    setLoginError('')
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setLoginError('Email or password incorrect')
+      } else {
+        setLoginError('Login error: ' + err.message)
+      }
+    }
   }
 
-  function handleLogout() { setIsLoggedIn(false); sessionStorage.removeItem('admin_logged_in') }
+  async function handleLogout() {
+    await signOut(auth)
+  }
 
   function startEdit(car: Car) {
     setEditingId(car.id)
     setForm({
-      name: car.name || '',
-      year: String(car.year || ''),
-      price: String(car.price || ''),
-      engine: car.engine || '',
-      km: String(car.km || ''),
-      description: car.description || '',
+      name: car.name || '', year: String(car.year || ''), price: String(car.price || ''),
+      engine: car.engine || '', km: String(car.km || ''), description: car.description || '',
     })
     setExistingImages(car.images || [])
     setImageFiles([])
@@ -113,18 +120,12 @@ export default function AdminPanel() {
 
     const allImages = [...existingImages, ...newImageUrls]
     const carData = {
-      name: form.name,
-      year: parseInt(form.year) || 0,
-      price: parseInt(form.price) || 0,
-      engine: form.engine,
-      km: parseInt(form.km) || 0,
-      description: form.description,
-      image_url: allImages[0] || '',
-      images: allImages,
+      name: form.name, year: parseInt(form.year) || 0, price: parseInt(form.price) || 0,
+      engine: form.engine, km: parseInt(form.km) || 0, description: form.description,
+      image_url: allImages[0] || '', images: allImages,
     }
 
     setUploadProgress('Saving...')
-
     try {
       if (editingId) {
         await set(ref(database, `cars/${editingId}`), carData)
@@ -148,13 +149,17 @@ export default function AdminPanel() {
 
   const S: React.CSSProperties = { padding: '12px', marginBottom: '12px', width: '100%', borderRadius: '8px', border: '2px solid #ddd', fontSize: '16px', boxSizing: 'border-box', backgroundColor: '#fff', color: '#000', fontFamily: 'Arial' }
 
-  if (!isLoggedIn) {
+  if (authLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', fontFamily: 'Arial' }}><p style={{ fontSize: '1.2rem', color: '#666' }}>Loading...</p></div>
+  }
+
+  if (!user) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f0f0f0', fontFamily: 'Arial' }}>
         <div style={{ background: 'white', padding: '3rem', borderRadius: '16px', width: '400px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
           <h1 style={{ textAlign: 'center', marginBottom: '2rem', color: '#0B1F3A' }}>🔒 Admin Login</h1>
           <form onSubmit={handleLogin}>
-            <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} style={S} required />
+            <input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={S} required />
             <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={S} required />
             {loginError && <p style={{ color: 'red', marginBottom: '1rem', textAlign: 'center' }}>{loginError}</p>}
             <button type="submit" style={{ width: '100%', padding: '14px', background: '#0B1F3A', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>Login</button>
@@ -168,7 +173,10 @@ export default function AdminPanel() {
     <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto', fontFamily: 'Arial', backgroundColor: '#f9f9f9', minHeight: '100vh' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h1 style={{ color: '#000' }}>🚗 Admin Panel</h1>
-        <button onClick={handleLogout} style={{ padding: '8px 16px', background: '#666', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '14px', color: '#666' }}>{user.email}</span>
+          <button onClick={handleLogout} style={{ padding: '8px 16px', background: '#666', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>
+        </div>
       </div>
 
       <div style={{ background: editingId ? '#FFF8E1' : '#fff', padding: '2rem', borderRadius: '12px', marginBottom: '2rem', border: editingId ? '2px solid #C9A84C' : '1px solid #ddd' }}>
